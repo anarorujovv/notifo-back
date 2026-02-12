@@ -58,7 +58,7 @@ async function getMatchingProducts(platformId, categoryId, minPrice, maxPrice) {
        FROM products
       WHERE platform_id = ?
         AND category_id = ?
-        AND is_viewed = 0
+        AND is_notifo = 0
         AND price BETWEEN ? AND ?
       ORDER BY time DESC
       `,
@@ -68,6 +68,20 @@ async function getMatchingProducts(platformId, categoryId, minPrice, maxPrice) {
   if (!rows.length) return [];
 
   return rows;
+}
+
+/**
+ * Mark products as notified globally.
+ * Note: Since multiple users might have the same product in their filters,
+ * and the user wants to mark it as 'notified' once it's processed in a cycle,
+ * we update them after the check.
+ */
+async function markProductsAsNotified(productIds) {
+  if (!productIds || productIds.length === 0) return;
+  await db.query(
+    "UPDATE products SET is_notifo = 1 WHERE id IN (?)",
+    [productIds]
+  );
 }
 
 async function filterWatcherService({ intervalMs = DEFAULT_INTERVAL_MS } = {}) {
@@ -82,6 +96,8 @@ async function filterWatcherService({ intervalMs = DEFAULT_INTERVAL_MS } = {}) {
         await sleep(intervalMs);
         continue;
       }
+
+      const allNotifiedProductIds = new Set();
 
       for (const filter of filters) {
         try {
@@ -117,6 +133,8 @@ async function filterWatcherService({ intervalMs = DEFAULT_INTERVAL_MS } = {}) {
 
             if (!products.length) continue;
 
+            products.forEach(p => allNotifiedProductIds.add(p.id));
+
             platformResults.push({
               platform_id: platformId,
               title: platformNames.get(platformId) || `Platform #${platformId}`,
@@ -132,7 +150,9 @@ async function filterWatcherService({ intervalMs = DEFAULT_INTERVAL_MS } = {}) {
               platforms: platformResults,
             };
 
-            // payload ready for emission (logging removed)
+            // Here we would emit to Socket.io or send Push Notification
+            // For now, it prepares the data for the front-end.
+            console.log(`[Watcher] Sending notification to user ${userId} for ${allNotifiedProductIds.size} products`);
           }
         } catch (filterError) {
           console.error(
@@ -141,6 +161,13 @@ async function filterWatcherService({ intervalMs = DEFAULT_INTERVAL_MS } = {}) {
           );
         }
       }
+
+      // After processing all filters in this cycle, mark products as notified
+      if (allNotifiedProductIds.size > 0) {
+        await markProductsAsNotified(Array.from(allNotifiedProductIds));
+        console.log(`[Watcher] Marked ${allNotifiedProductIds.size} products as notified.`);
+      }
+
     } catch (error) {
       console.error("[Watcher] Unexpected error:", error);
     }

@@ -147,7 +147,7 @@ async function fetchTapazTodayService(
 
           if (rows.length === 0) {
             await db.query(
-              `INSERT INTO products (platform_id, platform_listing_id, title, price, currency, url, image_url, extra_info, time, is_viewed, category_id)
+              `INSERT INTO products (platform_id, platform_listing_id, title, price, currency, url, image_url, extra_info, time, is_notifo, category_id)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
               [
                 TAPAZ_PLATFORM_ID,
@@ -168,7 +168,7 @@ async function fetchTapazTodayService(
             if (Number(existing.price) !== Number(price)) {
               await db.query(
                 `UPDATE products 
-                 SET price = ?, is_viewed = 0, title = ?, currency = ?, url = ?, image_url = ?, extra_info = ?, time = ?, category_id = COALESCE(?, category_id) 
+                 SET price = ?, is_notifo = 0, title = ?, currency = ?, url = ?, image_url = ?, extra_info = ?, time = ?, category_id = COALESCE(?, category_id) 
                  WHERE id = ?`,
                 [
                   price,
