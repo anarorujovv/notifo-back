@@ -3,9 +3,26 @@ const db = require("../db");
 const TAPAZ_PLATFORM_ID = 1;
 
 /**
+ * Utility to create a random delay between requests.
+ * Minimizes the risk of being flagged as a bot by avoiding robotic patterns.
+ */
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const getRandomDelay = (min = 2000, max = 5000) => 
+  Math.floor(Math.random() * (max - min + 1) + min);
+
+/**
+ * Professional User-Agent rotation (simplified for this example).
+ */
+const USER_AGENTS = [
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+];
+
+/**
  * Fetch today's products from Tap.az using the JSON-LD / __NEXT_DATA__ approach.
- * Stops when an ad from "yesterday" is encountered.
- * Skips VIP ads.
+ * Enhanced with rate limiting and ethical scraping practices.
  */
 async function fetchTapazTodayService(
   name,
@@ -30,6 +47,9 @@ async function fetchTapazTodayService(
 
   while (!shouldStop) {
     try {
+      // 1. Add a random delay before each request to mimic human behavior
+      await sleep(getRandomDelay());
+
       const encodedKeywords = encodeURIComponent(name.trim());
       const current_min_price = min_price ?? 0;
       const current_max_price = max_price ?? 999999;
@@ -46,11 +66,16 @@ async function fetchTapazTodayService(
 
       const url = `${baseUrl}?${queryParams.join("&")}`;
 
+      // 2. Rotate User-Agent and include proper headers
+      const randomUserAgent = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+
       const response = await axios.get(url, {
         headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "User-Agent": randomUserAgent,
           "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
           "Accept-Language": "az,tr;q=0.9,en;q=0.8",
+          "Referer": "https://tap.az/",
+          "Cache-Control": "no-cache"
         },
         timeout: 20000,
       });
@@ -59,15 +84,12 @@ async function fetchTapazTodayService(
       const jsonMatch = html.match(/<script id="__NEXT_DATA__" type="application\/json">(.*?)<\/script>/);
       
       if (!jsonMatch) {
-        console.error("[TapazService] __NEXT_DATA__ not found");
+        console.error("[TapazService] __NEXT_DATA__ not found. Site structure might have changed.");
         break;
       }
 
       const jsonData = JSON.parse(jsonMatch[1]);
       const pageProps = jsonData.props.pageProps;
-      
-      // VIP ads are usually in 'vipAds', normal ads in 'latestAds' or 'ads'
-      // We ONLY want normal ads.
       const adsData = (pageProps.latestAds && pageProps.latestAds.ads) || pageProps.ads;
       
       if (!adsData || !adsData.nodes || adsData.nodes.length === 0) {
@@ -80,8 +102,7 @@ async function fetchTapazTodayService(
         const adId = ad.legacyResourceId?.toString();
         if (!adId) continue;
 
-        // Skip VIP ads (They often have kinds like 'VIPPED', 'PREMIUM', etc.)
-        // In the JSON structure, we check 'kinds' array
+        // Skip VIP/Premium ads to respect normal listing order and avoid duplicates
         if (ad.kinds && (ad.kinds.includes("VIPPED") || ad.kinds.includes("PREMIUM"))) {
           continue;
         }
@@ -90,13 +111,12 @@ async function fetchTapazTodayService(
         const adDate = new Date(updatedAt);
         adDate.setHours(0, 0, 0, 0);
 
-        // If we hit an ad from YESTERDAY or earlier, stop everything
+        // Stop if we reach yesterday's listings
         if (adDate.getTime() < today.getTime()) {
           shouldStop = true;
           break;
         }
 
-        // Only process ads from TODAY
         if (adDate.getTime() === today.getTime()) {
           const title = ad.title || "";
           if (!title.toLowerCase().includes(name.toLowerCase())) {
@@ -169,7 +189,6 @@ async function fetchTapazTodayService(
         }
       }
 
-      // Check for next page cursor
       if (!shouldStop && adsData.pageInfo && adsData.pageInfo.hasNextPage) {
         cursor = adsData.pageInfo.endCursor;
       } else {
@@ -177,7 +196,12 @@ async function fetchTapazTodayService(
       }
 
     } catch (error) {
-      console.error("[TapazService] Loop Error:", error.message);
+      if (error.response && error.response.status === 429) {
+        console.error("[TapazService] Rate limit hit (429). Sleeping for longer...");
+        await sleep(60000); // Wait a full minute if rate limited
+      } else {
+        console.error("[TapazService] Loop Error:", error.message);
+      }
       break;
     }
   }
