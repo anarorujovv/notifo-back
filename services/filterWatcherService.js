@@ -54,7 +54,7 @@ async function getMatchingProducts(platformId, categoryId, minPrice, maxPrice) {
   const effectiveMax = Math.max(lowerBound, upperBound);
 
   const [rows] = await db.query(
-    `SELECT id, title, price, url, image_url
+    `SELECT id, title, price, url, image_url, platform_id, currency, time
        FROM products
       WHERE platform_id = ?
         AND category_id = ?
@@ -70,12 +70,6 @@ async function getMatchingProducts(platformId, categoryId, minPrice, maxPrice) {
   return rows;
 }
 
-/**
- * Mark products as notified globally.
- * Note: Since multiple users might have the same product in their filters,
- * and the user wants to mark it as 'notified' once it's processed in a cycle,
- * we update them after the check.
- */
 async function markProductsAsNotified(productIds) {
   if (!productIds || productIds.length === 0) return;
   await db.query(
@@ -84,7 +78,7 @@ async function markProductsAsNotified(productIds) {
   );
 }
 
-async function filterWatcherService({ intervalMs = DEFAULT_INTERVAL_MS } = {}) {
+async function filterWatcherService({ intervalMs = DEFAULT_INTERVAL_MS, io = null } = {}) {
 
   while (true) {
     try {
@@ -133,7 +127,11 @@ async function filterWatcherService({ intervalMs = DEFAULT_INTERVAL_MS } = {}) {
 
             if (!products.length) continue;
 
-            products.forEach(p => allNotifiedProductIds.add(p.id));
+            products.forEach(p => {
+              allNotifiedProductIds.add(p.id);
+              // Add platform name to product for front-end
+              p.platform_name = platformNames.get(platformId);
+            });
 
             platformResults.push({
               platform_id: platformId,
@@ -142,17 +140,13 @@ async function filterWatcherService({ intervalMs = DEFAULT_INTERVAL_MS } = {}) {
             });
           }
 
-          if (platformResults.length) {
-            const payload = {
-              user_id: userId,
+          if (platformResults.length && io) {
+            // Emit to specific user room via Socket.io
+            io.to(`user_${userId}`).emit("new_notification", {
               filter_id: Number(filter.id),
-              category_id: categoryId,
-              platforms: platformResults,
-            };
-
-            // Here we would emit to Socket.io or send Push Notification
-            // For now, it prepares the data for the front-end.
-            console.log(`[Watcher] Sending notification to user ${userId} for ${allNotifiedProductIds.size} products`);
+              platforms: platformResults
+            });
+            console.log(`[Watcher] Emitted Socket notification to user_${userId}`);
           }
         } catch (filterError) {
           console.error(
@@ -162,7 +156,6 @@ async function filterWatcherService({ intervalMs = DEFAULT_INTERVAL_MS } = {}) {
         }
       }
 
-      // After processing all filters in this cycle, mark products as notified
       if (allNotifiedProductIds.size > 0) {
         await markProductsAsNotified(Array.from(allNotifiedProductIds));
         console.log(`[Watcher] Marked ${allNotifiedProductIds.size} products as notified.`);
