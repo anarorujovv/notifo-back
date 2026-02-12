@@ -37,4 +37,30 @@ async function fetchTapazToday(req, res) {
   }
 }
 
-module.exports = { fetchTapazToday };
+async function getNotifications(req, res) {
+  const userId = req.user?.id;
+  if (!userId) return R.unauthorized(res);
+
+  try {
+    // Fetch products matching user filters that haven't been marked as notified in this logic
+    // However, the user wants a global 'is_notifo' but for individual users.
+    // Given the previous requirement, we will show products that match user filters.
+    const [products] = await db.query(
+      `SELECT p.*, plat.name as platform_name 
+       FROM products p
+       JOIN platforms plat ON p.platform_id = plat.id
+       JOIN filters f ON f.category_id = p.category_id
+       WHERE f.user_id = ? 
+         AND p.price BETWEEN f.min_price AND f.max_price
+         AND p.title LIKE CONCAT('%', (SELECT name_az FROM categories WHERE id = f.category_id), '%')
+         AND p.is_notifo = 1
+       ORDER BY p.time DESC LIMIT 50`,
+      [userId]
+    );
+    return R.ok(res, "Notifications fetched", products);
+  } catch (error) {
+    return R.serverError(res, "Error fetching notifications", error);
+  }
+}
+
+module.exports = { fetchTapazToday, getNotifications };

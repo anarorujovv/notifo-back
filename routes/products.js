@@ -10,4 +10,8 @@ router.post("/tapaz/today", async (req, res) => {
   await fetchTapazToday(req, res);
 });
 
+router.get("/notifications", auth, async (req, res) => {
+  await getNotifications(req, res);
+});
+
 module.exports = router;
