@@ -50,7 +50,6 @@ async function fetchTapazTodayService(
       timeout: 20000,
     });
 
-    // Extract __NEXT_DATA__ JSON from HTML
     const html = response.data;
     const jsonMatch = html.match(/<script id="__NEXT_DATA__" type="application\/json">(.*?)<\/script>/);
     
@@ -61,12 +60,9 @@ async function fetchTapazTodayService(
 
     const jsonData = JSON.parse(jsonMatch[1]);
     const pageProps = jsonData.props.pageProps;
-    
-    // Ads can be in 'latestAds' or 'ads' depending on the page type
     const adsData = (pageProps.latestAds && pageProps.latestAds.ads) || pageProps.ads;
     
     if (!adsData || !adsData.nodes) {
-      console.warn("[TapazService] No ads found in JSON data");
       return { processed: 0, inserted: 0, updated: 0 };
     }
 
@@ -78,24 +74,27 @@ async function fetchTapazTodayService(
       const adId = ad.legacyResourceId?.toString();
       if (!adId) continue;
 
-      // Filter: Title must contain the keyword (case-insensitive)
+      // 1. Title Filter (must contain the keyword)
       const title = ad.title || "";
       if (!title.toLowerCase().includes(name.toLowerCase())) {
         continue;
       }
 
-      // Filter: Must be from today
+      // 2. Price Filter (Double check in code because API might return broader results)
+      const price = parseFloat(ad.price) || 0;
+      if (price < current_min_price || price > current_max_price) {
+        continue;
+      }
+
+      // 3. Date Filter (Today only)
       const updatedAt = new Date(ad.updatedAt);
       const adDate = new Date(updatedAt);
       adDate.setHours(0, 0, 0, 0);
 
       if (adDate.getTime() !== today.getTime()) {
-        // Since ads are usually sorted by time, we could break here, 
-        // but for safety with JSON nodes, we just skip.
         continue;
       }
 
-      const price = parseFloat(ad.price) || 0;
       const currency = "AZN";
       const productUrl = `https://tap.az${ad.path}`;
       const imageUrl = ad.photo?.url || null;
@@ -106,7 +105,6 @@ async function fetchTapazTodayService(
         updated_at_raw: ad.updatedAt 
       });
 
-      // Format time for MySQL (YYYY-MM-DD HH:MM:SS)
       const formattedTime = updatedAt.toISOString().slice(0, 19).replace('T', ' ');
 
       const [rows] = await db.query(
@@ -158,7 +156,7 @@ async function fetchTapazTodayService(
     }
 
   } catch (error) {
-    console.error("[TapazService] Error fetching data:", error.message);
+    console.error("[TapazService] Error:", error.message);
   }
 
   return { processed: totalProcessed, inserted, updated };
